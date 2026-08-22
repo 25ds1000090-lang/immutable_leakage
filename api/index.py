@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from fastapi import FastAPI, Request, Response
 
 
-# Vercel requires this top-level application variable.
+# Vercel detects this top-level application.
 app = FastAPI()
 
 
@@ -39,6 +39,17 @@ def compact(value):
         value,
         ensure_ascii=False,
         separators=(",", ":"),
+    )
+
+
+def reject_json_constant(value):
+    raise ValueError("Invalid JSON constant")
+
+
+def strict_json_loads(value):
+    return json.loads(
+        value,
+        parse_constant=reject_json_constant,
     )
 
 
@@ -113,7 +124,11 @@ def utc_text(value):
 
 
 def canonicalize(value):
-    normalized = unicodedata.normalize("NFKC", value)
+    normalized = unicodedata.normalize(
+        "NFKC",
+        value,
+    )
+
     normalized = normalized.lower().strip()
 
     return " ".join(normalized.split())
@@ -127,7 +142,9 @@ def crc32c(data):
 
         for _ in range(8):
             if crc & 1:
-                crc = (crc >> 1) ^ 0x82F63B78
+                crc = (
+                    crc >> 1
+                ) ^ 0x82F63B78
             else:
                 crc >>= 1
 
@@ -141,7 +158,12 @@ def valid_row(value):
     if set(value.keys()) != ROW_KEYS:
         return False
 
-    for key in ("id", "entity", "eventTime", "text"):
+    for key in (
+        "id",
+        "entity",
+        "eventTime",
+        "text",
+    ):
         if not isinstance(value[key], str):
             return False
 
@@ -153,7 +175,10 @@ def valid_row(value):
     if not isinstance(revision, int):
         return False
 
-    if revision < 0 or revision > SAFE_MAX:
+    if revision < 0:
+        return False
+
+    if revision > SAFE_MAX:
         return False
 
     if parse_time(value["eventTime"]) is None:
@@ -196,29 +221,43 @@ def parse_object(obj):
         reasons.append("URI_INVALID")
 
     generation = obj.get("generation")
-    fetched_generation = obj.get("fetchedGeneration")
+    fetched_generation = obj.get(
+        "fetchedGeneration"
+    )
 
     generation_valid = (
         isinstance(generation, str)
-        and GEN_RE.fullmatch(generation) is not None
+        and GEN_RE.fullmatch(generation)
+        is not None
     )
 
     fetched_generation_valid = (
         isinstance(fetched_generation, str)
-        and GEN_RE.fullmatch(fetched_generation) is not None
+        and GEN_RE.fullmatch(
+            fetched_generation
+        )
+        is not None
     )
 
-    if not generation_valid or not fetched_generation_valid:
-        reasons.append("GENERATION_INVALID")
+    if (
+        not generation_valid
+        or not fetched_generation_valid
+    ):
+        reasons.append(
+            "GENERATION_INVALID"
+        )
 
     if generation != fetched_generation:
-        reasons.append("GENERATION_MISMATCH")
+        reasons.append(
+            "GENERATION_MISMATCH"
+        )
 
     supplied_crc = obj.get("crc32c")
 
     crc_valid = (
         isinstance(supplied_crc, str)
-        and CRC_RE.fullmatch(supplied_crc) is not None
+        and CRC_RE.fullmatch(supplied_crc)
+        is not None
     )
 
     if not crc_valid:
@@ -229,7 +268,9 @@ def parse_object(obj):
     if (
         crc_valid
         and isinstance(content, str)
-        and crc32c(content.encode("utf-8")) != supplied_crc
+        and crc32c(
+            content.encode("utf-8")
+        ) != supplied_crc
     ):
         reasons.append("CRC32C_MISMATCH")
 
@@ -243,7 +284,7 @@ def parse_object(obj):
     nonblank_count = 0
 
     if isinstance(content, str):
-        # JSONL records are separated only by LF.
+        # JSONL records are separated by LF.
         for line in content.split("\n"):
             if not line.strip():
                 continue
@@ -251,8 +292,11 @@ def parse_object(obj):
             nonblank_count += 1
 
             try:
-                parsed = json.loads(line)
-            except json.JSONDecodeError:
+                parsed = strict_json_loads(line)
+            except (
+                json.JSONDecodeError,
+                ValueError,
+            ):
                 reasons.append("JSONL_INVALID")
                 continue
 
@@ -264,26 +308,44 @@ def parse_object(obj):
         if nonblank_count == 0:
             reasons.append("SCHEMA_INVALID")
 
-    return output_uri, reason_list(reasons), rows
+    return (
+        output_uri,
+        reason_list(reasons),
+        rows,
+    )
 
 
 def policy_values(policy):
     if not isinstance(policy, dict):
         return None
 
-    minimum = parse_time(policy.get("minTime"))
-    maximum = parse_time(policy.get("maxTime"))
-    threshold = policy.get("contaminationThreshold")
+    minimum = parse_time(
+        policy.get("minTime")
+    )
+
+    maximum = parse_time(
+        policy.get("maxTime")
+    )
+
+    threshold = policy.get(
+        "contaminationThreshold"
+    )
 
     if isinstance(threshold, bool):
         return None
 
-    if not isinstance(threshold, (int, float)):
+    if not isinstance(
+        threshold,
+        (int, float),
+    ):
         return None
 
     threshold = float(threshold)
 
-    if minimum is None or maximum is None:
+    if minimum is None:
+        return None
+
+    if maximum is None:
         return None
 
     if minimum > maximum:
@@ -295,7 +357,11 @@ def policy_values(policy):
     if threshold < 0 or threshold > 1:
         return None
 
-    return minimum, maximum, threshold
+    return (
+        minimum,
+        maximum,
+        threshold,
+    )
 
 
 def word_set(text):
@@ -303,7 +369,9 @@ def word_set(text):
     current = []
 
     for character in text.lower():
-        category = unicodedata.category(character)
+        category = unicodedata.category(
+            character
+        )
 
         if category[0] in ("L", "N"):
             current.append(character)
@@ -334,11 +402,10 @@ def row_sort_key(row):
 def rejected_object_sort_key(item):
     uri = item["uri"]
 
-    uri_bytes = (
-        b""
-        if uri is None
-        else uri.encode("utf-8")
-    )
+    if uri is None:
+        uri_bytes = b""
+    else:
+        uri_bytes = uri.encode("utf-8")
 
     return (
         uri_bytes,
@@ -382,7 +449,9 @@ def build_corpus(payload):
         lineage.append(
             {
                 "uri": obj["uri"],
-                "generation": obj["generation"],
+                "generation": (
+                    obj["generation"]
+                ),
                 "crc32c": obj["crc32c"],
                 "schemaId": obj["schemaId"],
             }
@@ -398,7 +467,9 @@ def build_corpus(payload):
                     row["entity"]
                 ),
                 "eventTime": utc_text(
-                    parse_time(row["eventTime"])
+                    parse_time(
+                        row["eventTime"]
+                    )
                 ),
                 "revision": row["revision"],
                 "text": canonicalize(
@@ -435,7 +506,9 @@ def build_corpus(payload):
             ),
         )
 
-        retained_rows.append(ranked_rows[0])
+        retained_rows.append(
+            ranked_rows[0]
+        )
 
         for losing_row in ranked_rows[1:]:
             rejected_rows.append(
@@ -510,7 +583,8 @@ def build_corpus(payload):
 
     train_rows = [
         row
-        for row, split_name in split_candidates
+        for row, split_name
+        in split_candidates
         if split_name == "train"
     ]
 
@@ -522,7 +596,10 @@ def build_corpus(payload):
     if policy is not None:
         threshold = policy[2]
 
-        for row, split_name in split_candidates:
+        for (
+            row,
+            split_name,
+        ) in split_candidates:
             contaminated = False
 
             if split_name != "train":
@@ -550,7 +627,9 @@ def build_corpus(payload):
                     }
                 )
             else:
-                splits[split_name].append(row)
+                splits[split_name].append(
+                    row
+                )
 
     digests = {}
 
@@ -621,7 +700,9 @@ async def health():
         200,
         {
             "status": "ok",
-            "endpoint": "POST /build-corpus",
+            "endpoint": (
+                "POST /build-corpus"
+            ),
         },
     )
 
@@ -629,10 +710,38 @@ async def health():
 @app.post("/build-corpus")
 @app.post("/api/index")
 @app.post("/api/index.py")
-async def corpus_endpoint(request: Request):
+async def corpus_endpoint(
+    request: Request,
+):
+    content_type = request.headers.get(
+        "content-type",
+        "",
+    )
+
+    media_type = (
+        content_type
+        .split(";", 1)[0]
+        .strip()
+        .lower()
+    )
+
+    if media_type != "application/json":
+        return json_response(
+            400,
+            {"error": "INVALID_INPUT"},
+        )
+
     try:
-        payload = await request.json()
-    except Exception:
+        raw_body = await request.body()
+
+        payload = strict_json_loads(
+            raw_body.decode("utf-8")
+        )
+    except (
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+        ValueError,
+    ):
         return json_response(
             400,
             {"error": "INVALID_INPUT"},
