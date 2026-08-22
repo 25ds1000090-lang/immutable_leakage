@@ -284,4 +284,50 @@ class handler(BaseHTTPRequestHandler):
         self.send_json(200, build_corpus(payload))
 
     def do_GET(self):
-        self.send_json(200, {"status": "ok", "endpoint": "POST /build-corpus"})
+        self.send_json(200, {"status": "ok", "endpoint": "POST /build-corpus"}
+class handler(BaseHTTPRequestHandler):
+    def send_json(self, status, value):
+        body = compact(value).encode("utf-8")
+
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_POST(self):
+        route = self.path.split("?", 1)[0].rstrip("/") or "/"
+
+        if route not in (
+            "/build-corpus",
+            "/api/index",
+            "/api/index.py",
+        ):
+            self.send_json(404, {"error": "NOT_FOUND"})
+            return
+
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            payload = json.loads(self.rfile.read(length))
+        except (ValueError, json.JSONDecodeError):
+            self.send_json(400, {"error": "INVALID_INPUT"})
+            return
+
+        if (
+            not isinstance(payload, dict)
+            or "policy" not in payload
+            or not isinstance(payload.get("objects"), list)
+        ):
+            self.send_json(400, {"error": "INVALID_INPUT"})
+            return
+
+        self.send_json(200, build_corpus(payload))
+
+    def do_GET(self):
+        self.send_json(
+            200,
+            {
+                "status": "ok",
+                "endpoint": "POST /build-corpus"
+            }
+        )
