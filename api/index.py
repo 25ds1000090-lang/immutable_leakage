@@ -267,9 +267,11 @@ class handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self):
-        if self.path.split("?", 1)[0] != "/build-corpus":
-            self.send_json(404, {"error": "NOT_FOUND"})
-            return
+    route = self.path.split("?", 1)[0].rstrip("/") or "/"
+
+    if route not in ("/build-corpus", "/api/index", "/api/index.py"):
+        self.send_json(404, {"error": "NOT_FOUND"})
+        return
         try:
             length = int(self.headers.get("Content-Length", "0"))
             payload = json.loads(self.rfile.read(length))
