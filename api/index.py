@@ -754,24 +754,6 @@ async def health():
 async def corpus_endpoint(
     request: Request,
 ):
-    content_type = request.headers.get(
-        "content-type",
-        "",
-    )
-
-    media_type = (
-        content_type
-        .split(";", 1)[0]
-        .strip()
-        .lower()
-    )
-
-    if media_type != "application/json":
-        return json_response(
-            400,
-            {"error": "INVALID_INPUT"},
-        )
-
     try:
         raw_body = await request.body()
 
