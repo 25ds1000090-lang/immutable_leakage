@@ -8,6 +8,10 @@ from datetime import datetime, timezone
 from fastapi import FastAPI, Request, Response
 
 
+# Vercel requires this top-level application variable.
+app = FastAPI()
+
+
 SAFE_MAX = 9007199254740991
 
 TS_RE = re.compile(
@@ -19,7 +23,7 @@ TS_RE = re.compile(
 
 GEN_RE = re.compile(r"^[0-9]+$")
 CRC_RE = re.compile(r"^[0-9a-f]{8}$")
-URI_RE = re.compile(r"^gs://[^/]+/.+$"
+URI_RE = re.compile(r"^gs://[^/]+/.+$")
 
 ROW_KEYS = {
     "id",
@@ -239,6 +243,7 @@ def parse_object(obj):
     nonblank_count = 0
 
     if isinstance(content, str):
+        # JSONL records are separated only by LF.
         for line in content.split("\n"):
             if not line.strip():
                 continue
@@ -321,18 +326,19 @@ def jaccard(left, right):
 
 def row_sort_key(row):
     return (
-        byte_key(row["id"]),
-        byte_key(compact(row)),
+        row["id"].encode("utf-8"),
+        compact(row).encode("utf-8"),
     )
 
 
-def object_sort_key(item):
+def rejected_object_sort_key(item):
     uri = item["uri"]
 
-    if uri is None:
-        uri_bytes = b""
-    else:
-        uri_bytes = uri.encode("utf-8")
+    uri_bytes = (
+        b""
+        if uri is None
+        else uri.encode("utf-8")
+    )
 
     return (
         uri_bytes,
@@ -388,12 +394,16 @@ def build_corpus(payload):
         canonical_rows.append(
             {
                 "id": row["id"],
-                "entity": canonicalize(row["entity"]),
+                "entity": canonicalize(
+                    row["entity"]
+                ),
                 "eventTime": utc_text(
                     parse_time(row["eventTime"])
                 ),
                 "revision": row["revision"],
-                "text": canonicalize(row["text"]),
+                "text": canonicalize(
+                    row["text"]
+                ),
             }
         )
 
@@ -431,11 +441,16 @@ def build_corpus(payload):
             rejected_rows.append(
                 {
                     "id": losing_row["id"],
-                    "reasonCodes": ["DUPLICATE"],
+                    "reasonCodes": [
+                        "DUPLICATE"
+                    ],
                 }
             )
 
-    policy = policy_values(payload["policy"])
+    policy = policy_values(
+        payload["policy"]
+    )
+
     split_candidates = []
 
     if policy is None:
@@ -443,20 +458,29 @@ def build_corpus(payload):
             rejected_rows.append(
                 {
                     "id": row["id"],
-                    "reasonCodes": ["POLICY_INVALID"],
+                    "reasonCodes": [
+                        "POLICY_INVALID"
+                    ],
                 }
             )
     else:
         minimum, maximum, threshold = policy
 
         for row in retained_rows:
-            event_time = parse_time(row["eventTime"])
+            event_time = parse_time(
+                row["eventTime"]
+            )
 
-            if event_time < minimum or event_time > maximum:
+            if (
+                event_time < minimum
+                or event_time > maximum
+            ):
                 rejected_rows.append(
                     {
                         "id": row["id"],
-                        "reasonCodes": ["OUT_OF_WINDOW"],
+                        "reasonCodes": [
+                            "OUT_OF_WINDOW"
+                        ],
                     }
                 )
                 continue
@@ -502,7 +526,9 @@ def build_corpus(payload):
             contaminated = False
 
             if split_name != "train":
-                current_words = word_set(row["text"])
+                current_words = word_set(
+                    row["text"]
+                )
 
                 for training_words in train_word_sets:
                     similarity = jaccard(
@@ -542,9 +568,11 @@ def build_corpus(payload):
             for row in splits[split_name]
         ).encode("utf-8")
 
-        digests[split_name] = hashlib.sha256(
-            artifact
-        ).hexdigest()
+        digests[split_name] = (
+            hashlib.sha256(
+                artifact
+            ).hexdigest()
+        )
 
     for item in rejected_objects:
         item["reasonCodes"] = reason_list(
@@ -557,7 +585,7 @@ def build_corpus(payload):
         )
 
     rejected_objects.sort(
-        key=object_sort_key
+        key=rejected_object_sort_key
     )
 
     rejected_rows.sort(
@@ -575,9 +603,6 @@ def build_corpus(payload):
         "digests": digests,
         "lineage": lineage,
     }
-
-
-app = FastAPI()
 
 
 def json_response(status, value):
@@ -616,7 +641,10 @@ async def corpus_endpoint(request: Request):
     if (
         not isinstance(payload, dict)
         or "policy" not in payload
-        or not isinstance(payload.get("objects"), list)
+        or not isinstance(
+            payload.get("objects"),
+            list,
+        )
     ):
         return json_response(
             400,
