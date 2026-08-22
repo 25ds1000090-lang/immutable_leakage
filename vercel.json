@@ -1,6 +1,13 @@
 {
+  "version": 2,
   "rewrites": [
-    { "source": "/build-corpus", "destination": "/api/index.py" },
-    { "source": "/", "destination": "/api/index.py" }
+    {
+      "source": "/build-corpus",
+      "destination": "/api/index"
+    },
+    {
+      "source": "/",
+      "destination": "/api/index"
+    }
   ]
 }
