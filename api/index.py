@@ -10,7 +10,6 @@ from fastapi import FastAPI, Request, Response
 
 app = FastAPI()
 
-
 SAFE_MAX = 9007199254740991
 
 TS_RE = re.compile(
@@ -45,10 +44,29 @@ def reject_json_constant(value):
     raise ValueError("Invalid JSON constant")
 
 
+class DuplicateKeyError(ValueError):
+    pass
+
+
+def reject_duplicate_keys(pairs):
+    result = {}
+
+    for key, value in pairs:
+        if key in result:
+            raise DuplicateKeyError(
+                "Duplicate JSON object key"
+            )
+
+        result[key] = value
+
+    return result
+
+
 def strict_json_loads(value):
     return json.loads(
         value,
         parse_constant=reject_json_constant,
+        object_pairs_hook=reject_duplicate_keys,
     )
 
 
@@ -103,10 +121,7 @@ def parse_time(value):
 
         zone_text = zone
 
-    milliseconds = (
-        fraction + "000"
-    )[:3]
-
+    milliseconds = (fraction + "000")[:3]
     microseconds = milliseconds + "000"
 
     try:
@@ -119,18 +134,14 @@ def parse_time(value):
         return None
 
     try:
-        return parsed.astimezone(
-            timezone.utc
-        )
+        return parsed.astimezone(timezone.utc)
     except (OverflowError, ValueError):
         return None
 
 
 def utc_text(value):
     return (
-        value.strftime(
-            "%Y-%m-%dT%H:%M:%S."
-        )
+        value.strftime("%Y-%m-%dT%H:%M:%S.")
         + f"{value.microsecond // 1000:03d}Z"
     )
 
@@ -141,13 +152,9 @@ def canonicalize(value):
         value,
     )
 
-    normalized = (
-        normalized.lower().strip()
-    )
+    normalized = normalized.lower().strip()
 
-    return " ".join(
-        normalized.split()
-    )
+    return " ".join(normalized.split())
 
 
 def crc32c(data):
@@ -180,10 +187,7 @@ def valid_row(value):
         "eventTime",
         "text",
     ):
-        if not isinstance(
-            value[key],
-            str,
-        ):
+        if not isinstance(value[key], str):
             return False
 
     revision = value["revision"]
@@ -200,9 +204,7 @@ def valid_row(value):
     if revision > SAFE_MAX:
         return False
 
-    if parse_time(
-        value["eventTime"]
-    ) is None:
+    if parse_time(value["eventTime"]) is None:
         return False
 
     return True
@@ -236,37 +238,28 @@ def parse_object(obj):
         )
 
     if (
-        not isinstance(
-            supplied_uri,
-            str,
-        )
-        or URI_RE.fullmatch(
-            supplied_uri
-        ) is None
+        not isinstance(supplied_uri, str)
+        or URI_RE.fullmatch(supplied_uri) is None
     ):
         reasons.append("URI_INVALID")
 
     generation = obj.get("generation")
-
     fetched_generation = obj.get(
         "fetchedGeneration"
     )
 
     generation_valid = (
         isinstance(generation, str)
-        and GEN_RE.fullmatch(
-            generation
-        ) is not None
+        and GEN_RE.fullmatch(generation)
+        is not None
     )
 
     fetched_generation_valid = (
-        isinstance(
-            fetched_generation,
-            str,
-        )
+        isinstance(fetched_generation, str)
         and GEN_RE.fullmatch(
             fetched_generation
-        ) is not None
+        )
+        is not None
     )
 
     if (
@@ -286,9 +279,8 @@ def parse_object(obj):
 
     crc_valid = (
         isinstance(supplied_crc, str)
-        and CRC_RE.fullmatch(
-            supplied_crc
-        ) is not None
+        and CRC_RE.fullmatch(supplied_crc)
+        is not None
     )
 
     if not crc_valid:
@@ -310,8 +302,7 @@ def parse_object(obj):
         )
 
     if (
-        obj.get("schemaId")
-        != "training-v1"
+        obj.get("schemaId") != "training-v1"
         or not isinstance(content, str)
     ):
         reasons.append(
@@ -319,16 +310,22 @@ def parse_object(obj):
         )
 
     rows = []
+    nonblank_count = 0
 
     if isinstance(content, str):
         for line in content.split("\n"):
             if not line.strip():
                 continue
 
+            nonblank_count += 1
+
             try:
-                parsed = strict_json_loads(
-                    line
+                parsed = strict_json_loads(line)
+            except DuplicateKeyError:
+                reasons.append(
+                    "SCHEMA_INVALID"
                 )
+                continue
             except (
                 json.JSONDecodeError,
                 ValueError,
@@ -345,9 +342,7 @@ def parse_object(obj):
             else:
                 rows.append(parsed)
 
-        # Every file must have at least
-        # one valid row.
-        if len(rows) == 0:
+        if nonblank_count == 0:
             reasons.append(
                 "SCHEMA_INVALID"
             )
@@ -398,10 +393,7 @@ def policy_values(policy):
     if not math.isfinite(threshold):
         return None
 
-    if threshold < 0:
-        return None
-
-    if threshold > 1:
+    if threshold < 0 or threshold > 1:
         return None
 
     return (
@@ -423,15 +415,11 @@ def word_set(text):
         if category[0] in ("L", "N"):
             current.append(character)
         elif current:
-            words.add(
-                "".join(current)
-            )
+            words.add("".join(current))
             current = []
 
     if current:
-        words.add(
-            "".join(current)
-        )
+        words.add("".join(current))
 
     return words
 
@@ -487,9 +475,7 @@ def build_corpus(payload):
     lineage = []
 
     for obj in payload["objects"]:
-        uri, codes, rows = parse_object(
-            obj
-        )
+        uri, codes, rows = parse_object(obj)
 
         if codes:
             rejected_objects.append(
@@ -505,9 +491,7 @@ def build_corpus(payload):
         lineage.append(
             {
                 "uri": obj["uri"],
-                "generation": (
-                    obj["generation"]
-                ),
+                "generation": obj["generation"],
                 "crc32c": obj["crc32c"],
                 "schemaId": obj["schemaId"],
             }
@@ -672,10 +656,7 @@ def build_corpus(payload):
                         training_words,
                     )
 
-                    if (
-                        similarity
-                        >= threshold
-                    ):
+                    if similarity >= threshold:
                         contaminated = True
                         break
 
@@ -762,9 +743,7 @@ async def health():
         200,
         {
             "status": "ok",
-            "endpoint": (
-                "POST /build-corpus"
-            ),
+            "endpoint": "POST /build-corpus",
         },
     )
 
@@ -801,6 +780,7 @@ async def corpus_endpoint(
         )
     except (
         UnicodeDecodeError,
+        DuplicateKeyError,
         json.JSONDecodeError,
         ValueError,
     ):
