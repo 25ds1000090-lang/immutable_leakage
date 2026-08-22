@@ -19,7 +19,7 @@ TS_RE = re.compile(
 
 GEN_RE = re.compile(r"^[0-9]+$")
 CRC_RE = re.compile(r"^[0-9a-f]{8}$")
-URI_RE = re.compile(r"^gs://[^/\s]+/\S+$")
+URI_RE = re.compile(r"^gs://[^/]+/.+$"
 
 ROW_KEYS = {
     "id",
@@ -239,7 +239,7 @@ def parse_object(obj):
     nonblank_count = 0
 
     if isinstance(content, str):
-        for line in content.splitlines():
+        for line in content.split("\n"):
             if not line.strip():
                 continue
 
